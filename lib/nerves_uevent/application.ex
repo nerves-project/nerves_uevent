@@ -12,7 +12,9 @@ defmodule NervesUEvent.Application do
       {NervesUEvent.UEvent, opts}
     ]
 
-    opts = [strategy: :one_for_one, name: NervesUEvent.Supervisor]
+    # :rest_for_one to handle the rare case where the PropertyTable
+    # crashes. Restarting UEvent will scan the system.
+    opts = [strategy: :rest_for_one, name: NervesUEvent.Supervisor]
     Supervisor.start_link(children, opts)
   end
 end
