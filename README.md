@@ -40,6 +40,71 @@ config :nerves_uevent, autoload_modules: false
 
 ## Usage
 
+NervesUEvent is currently very low level in what it reports and reflects the
+Linux representation. For example, say that you're interested in an MMC device
+and you've found out that Linux exposes it in the
+`/sys/devices/platform/soc/2100000.bus/2194000.mmc` directory. Linux also sends
+UEvent messages for all devices in `/sys/device`, so NervesUEvent will know
+about this too. To query NervesUEvent for device information, drop `/sys` off
+the path and convert to a list of strings like this:
+
+```elixir
+iex> NervesUEvent.get(["devices", "platform", "soc", "2100000.bus", "2190000.mmc"])
+%{
+  "driver" => "sdhci-esdhc-imx",
+  "modalias" => "of:NmmcT(null)Cfsl,imx6ull-usdhcCfsl,imx6sx-usdhc",
+  "of_alias_0" => "mmc1",
+  "of_compatible_0" => "fsl,imx6ull-usdhc",
+  "of_compatible_1" => "fsl,imx6sx-usdhc",
+  "of_compatible_n" => "2",
+  "of_fullname" => "/soc/bus@2100000/mmc@2190000",
+  "of_name" => "mmc",
+  "subsystem" => "platform"
+}
+```
+
+Some devices have more useful information than others. This particular one
+mostly shows information found in the device tree file for this device. Of note
+is the `"modalias"` key. When NervesUEvent sees this, it will try to load the
+appropriate Linux kernel driver for this device if one exists.
+
+More usefully, you can subscribe for events. For example, if you'd like to be
+notified when a MicroSD card has been inserted, you can subscribe to all events
+on that device:
+
+```elixir
+iex> NervesUEvent.subscribe(["devices", "platform", "soc", "2100000.bus", "2190000.mmc"])
+```
+
+If you're not sure what to subscribe to, subscribe to all events to see what happens:
+
+```elixir
+iex> NervesUEvent.subscribe([])
+```
+
+Now if you physically insert a MicroSD card, NervesUEvent will send messages to
+your process mailbox. Here's one of the events:
+
+```elixir
+iex> flush
+%PropertyTable.Event{
+  table: NervesUEvent,
+  timestamp: 2558213871126,
+  property: ["devices", "platform", "soc", "2100000.bus", "2190000.mmc", "mmc_host", "mmc0", "mmc0:1234"],
+  value: %{
+    "mmc_name" => "SA04G",
+    "mmc_type" => "SD",
+    "modalias" => "mmc:block",
+    "subsystem" => "mmc"
+  },
+  previous_timestamp: nil,
+  previous_value: nil
+}
+```
+
+The primary fields of interest are `:table`, `:timestamp`, `:property`, and
+`:value`. NervesUEvent uses the PropertyTable library for storing everything and
+publishing changes. The timestamps are from `System.monotonic_time/0`.
 
 ## License
 
