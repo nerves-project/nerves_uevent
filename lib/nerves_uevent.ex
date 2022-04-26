@@ -29,6 +29,7 @@ defmodule NervesUEvent do
     "of_name" => "rgb1-blue",
     "subsystem" => "leds"
   }}
+  ```
   """
   @spec get(PropertyTable.property(), PropertyTable.value()) :: PropertyTable.value()
   def get(property, default \\ nil), do: PropertyTable.get(NervesUEvent, property, default)
