@@ -37,7 +37,7 @@ defmodule NervesUEvent.MixProject do
 
   defp deps do
     [
-      {:property_table, "~> 0.1.0"},
+      {:property_table, "~> 0.2.0"},
       {:elixir_make, "~> 0.6", runtime: false},
       {:ex_doc, "~> 0.22", only: :docs, runtime: false},
       {:dialyxir, "~> 1.1", only: :dev, runtime: false},

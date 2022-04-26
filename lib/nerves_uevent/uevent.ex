@@ -40,23 +40,23 @@ defmodule NervesUEvent.UEvent do
   def handle_info({port, {:data, message}}, port) do
     case :erlang.binary_to_term(message) do
       {:add, path, kvmap} ->
-        :ok = PropertyTable.put(NervesUEvent, path, kvmap)
+        PropertyTable.put(NervesUEvent, path, kvmap)
 
       {:bind, _path, _kvmap} ->
         # Ignore device driver bind updates
         :ok
 
       {:change, path, kvmap} ->
-        :ok = PropertyTable.put(NervesUEvent, path, kvmap)
+        PropertyTable.put(NervesUEvent, path, kvmap)
 
       {:move, new_path, %{"devpath_old" => devpath_old}} ->
         old_path = String.split(devpath_old, "/")
         kvmap = PropertyTable.get(NervesUEvent, old_path)
-        PropertyTable.clear(NervesUEvent, old_path)
-        :ok = PropertyTable.put(NervesUEvent, new_path, kvmap)
+        PropertyTable.delete(NervesUEvent, old_path)
+        PropertyTable.put(NervesUEvent, new_path, kvmap)
 
       {:remove, path, _kvmap} ->
-        PropertyTable.clear(NervesUEvent, path)
+        PropertyTable.delete(NervesUEvent, path)
 
       {:unbind, _path, _kvmap} ->
         # Ignore device driver unbind updates
