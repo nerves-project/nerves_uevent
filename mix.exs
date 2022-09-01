@@ -10,7 +10,6 @@ defmodule NervesUEvent.MixProject do
       version: @version,
       elixir: "~> 1.9",
       start_permanent: Mix.env() == :prod,
-      build_embedded: true,
       compilers: [:elixir_make | Mix.compilers()],
       make_targets: ["all"],
       make_clean: ["mix_clean"],
