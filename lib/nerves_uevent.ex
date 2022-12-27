@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2017 Nerves Project Developers
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule NervesUEvent do
   @moduledoc """
   NervesUEvent listens for events from the Linux kernel, automatically loads

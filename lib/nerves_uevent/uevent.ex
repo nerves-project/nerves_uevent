@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2017 Nerves Project Developers
+#
+# SPDX-License-Identifier: Apache-2.0
+
 defmodule NervesUEvent.UEvent do
   @moduledoc """
   GenServer that captures Linux uevent messages and passes them up to Elixir.
