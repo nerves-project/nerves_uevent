@@ -1,6 +1,6 @@
 # NervesUEvent
 
-[![CircleCI](https://circleci.com/gh/nerves-project/nerves_uevent/tree/main.svg?style=svg)](https://circleci.com/gh/nerves-project/nerves_uevent/tree/main)
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/nerves-project/nerves_uevent/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/nerves-project/nerves_uevent/tree/main)
 [![Hex version](https://img.shields.io/hexpm/v/nerves_uevent.svg "Hex version")](https://hex.pm/packages/nerves_uevent)
 
 NervesUEvent listens for events from the Linux kernel, automatically loads
