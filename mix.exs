@@ -8,7 +8,7 @@ defmodule NervesUEvent.MixProject do
     [
       app: :nerves_uevent,
       version: @version,
-      elixir: "~> 1.9",
+      elixir: "~> 1.13",
       start_permanent: Mix.env() == :prod,
       compilers: [:elixir_make | Mix.compilers()],
       make_targets: ["all"],
