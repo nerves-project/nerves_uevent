@@ -1,5 +1,4 @@
-// Copyright 2016 Frank Hunleth
-// SPDX-FileCopyrightText: 2017 Nerves Project Developers
+// SPDX-FileCopyrightText: 2022 Frank Hunleth
 //
 // SPDX-License-Identifier: Apache-2.0
 
