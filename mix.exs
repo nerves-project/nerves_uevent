@@ -16,7 +16,8 @@ defmodule NervesUEvent.MixProject do
       make_error_message: """
       If the error message above says that libmnl.h can't be found, then the
       fix is to install libmnl. For example, run `apt install libmnl-dev` on
-      Debian-based systems.
+      Debian-based systems. For Nerves targets, be sure to include 
+      `BR2_PACKAGE_LIBMNL=y` in the Buildroot defconfig
       """,
       description: description(),
       package: package(),
