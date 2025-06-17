@@ -16,15 +16,14 @@ defmodule NervesUEvent.MixProject do
       make_error_message: """
       If the error message above says that libmnl.h can't be found, then the
       fix is to install libmnl. For example, run `apt install libmnl-dev` on
-      Debian-based systems. For Nerves targets, be sure to include 
-      `BR2_PACKAGE_LIBMNL=y` in the Buildroot defconfig
+      Debian-based systems. For Nerves targets, be sure to include
+      `BR2_PACKAGE_LIBMNL=y` in the Nerves system's nerves_defconfig.
       """,
       description: description(),
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),
-      deps: deps(),
-      preferred_cli_env: %{docs: :docs, "hex.build": :docs, "hex.publish": :docs}
+      deps: deps()
     ]
   end
 
@@ -33,6 +32,10 @@ defmodule NervesUEvent.MixProject do
       extra_applications: [:logger],
       mod: {NervesUEvent.Application, []}
     ]
+  end
+
+  def cli do
+    [preferred_envs: %{docs: :docs, "hex.build": :docs, "hex.publish": :docs}]
   end
 
   defp deps do
