@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.2 - 2025-06-17
+
+* Updates
+  * Improve C compilation error message to help custom Nerves systems builders
+  * Fix Elixir 1.19 warning
+
 ## v0.1.1 - 2025-01-06
 
 * Updates
