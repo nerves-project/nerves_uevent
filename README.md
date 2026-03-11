@@ -1,3 +1,8 @@
+<!--
+  SPDX-FileCopyrightText: 2022 Frank Hunleth
+  SPDX-License-Identifier: CC-BY-4.0
+-->
+
 # NervesUEvent
 
 [![Hex version](https://img.shields.io/hexpm/v/nerves_uevent.svg "Hex version")](https://hex.pm/packages/nerves_uevent)
