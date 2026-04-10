@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -129,11 +130,14 @@ static struct mnl_socket *uevent_open()
     if (mnl_socket_bind(nl_uevent, (1 << 0), MNL_SOCKET_AUTOPID) < 0)
         err(EXIT_FAILURE, "mnl_socket_bind");
 
-    // Turn off ENOBUFS notifications since there's nothing that we can do
-    // about them.
-    unsigned int val = 1;
-    if (mnl_socket_setsockopt(nl_uevent, NETLINK_NO_ENOBUFS, &val, sizeof(val)) < 0)
-        err(EXIT_FAILURE, "mnl_socket_setsockopt(NETLINK_NO_ENOBUFS)");
+    int nl_fd = mnl_socket_get_fd(nl_uevent);
+
+    // Increase receive buffer to avoid dropping uevent messages. There's no
+    // way to get back those dropped messages. The initial device scan can
+    // overwhelm the default limits.
+    unsigned int bufsize = 1024 * 1024;
+    (void) setsockopt(nl_fd, SOL_SOCKET, SO_RCVBUFFORCE, &bufsize, sizeof(bufsize));
+    (void) setsockopt(nl_fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
 
     return nl_uevent;
 }
@@ -197,8 +201,15 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
     if (bytecount <= 0) {
         if (errno == EAGAIN)
             return -1;
-        else
-            err(EXIT_FAILURE, "mnl_socket_recvfrom");
+        if (errno == ENOBUFS) {
+            // This doesn't getting printed in a helpful location and
+            // handling it other ways doesn't make things better. It is
+            // useful when debugging if messages are suspected to have
+            // been dropped.
+            // warnx("mnl_socket_recvfrom: netlink messages dropped");
+            return -1;
+        }
+        err(EXIT_FAILURE, "mnl_socket_recvfrom");
     }
 
     char *str = nlbuf;
