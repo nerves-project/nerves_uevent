@@ -5,6 +5,15 @@
 
 # Changelog
 
+## v0.1.3 - 2026-04-10
+
+* Updates
+  * Fix issue with dropped uevents during initial device enumeration. This
+    resulted in a device driver not being modprobed. The fix is to significantly
+    increase the max queue length, which mirrors how other tools solved the
+    issue.
+  * Reduce calls to modprobe by pruning modalias duplicates
+
 ## v0.1.2 - 2025-06-17
 
 * Updates
