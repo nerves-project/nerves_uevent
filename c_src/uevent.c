@@ -78,6 +78,12 @@ static void run_modprobes()
 
 static void queue_modprobe(char *modalias)
 {
+    // Optimization: Skip consecutive duplicate modalias strings since some
+    // devices have several adjacent entries serviced by the same alias.
+    if (modprobe_queue_n > 2 &&
+        strcmp(modprobe_queue_argv[modprobe_queue_n - 1], modalias) == 0)
+        return;
+
     size_t modalias_len = strlen(modalias) + 1;
     if (modprobe_queue_index + modalias_len > sizeof(modprobe_queue_buffer)) {
         run_modprobes();
