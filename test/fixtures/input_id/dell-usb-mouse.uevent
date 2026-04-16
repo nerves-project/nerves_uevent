@@ -1,0 +1,10 @@
+PRODUCT=3/413c/3012/111
+NAME="Dell Dell USB Optical Mouse"
+PHYS="usb-xhci-hcd.1-1/input0"
+UNIQ=""
+PROP=0
+EV=17
+KEY=70000 0 0 0 0
+REL=903
+MSC=10
+MODALIAS=input:b0003v413Cp3012e0111-e0,1,2,4,k110,111,112,r0,1,8,B,am4,lsfw

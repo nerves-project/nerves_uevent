@@ -13,6 +13,7 @@ defmodule NervesUEvent.Application do
 
     children = [
       {PropertyTable, name: NervesUEvent},
+      {NervesUEvent.InputListener, opts},
       {NervesUEvent.UEvent, opts}
     ]
 

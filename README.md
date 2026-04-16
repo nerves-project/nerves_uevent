@@ -34,16 +34,31 @@ similar functionality. It's an advanced use case to modify this dependency.
 ## Configuration
 
 NervesUEvent automatically starts on boot. Configuration is supplied via
-application config. The following option is available:
+application config. The following options are available:
 
 * `:autoload_modules` - defaults to `true` to automatically run `modprobe` when
   needed
+* `:manage_udev` - whether NervesUEvent should classify input devices and
+  write `/run/udev/data/c<major>:<minor>` files for libinput. When unset,
+  NervesUEvent auto-detects udevd by checking for `/run/udev/control` and
+  disables its own management (with a warning) if udevd is running. Set to
+  `true` to force-enable or `false` to force-disable and silence the warning.
 
 Here's a `config.exs` example:
 
 ```elixir
 config :nerves_uevent, autoload_modules: false
 ```
+
+## Replacing udevd for libinput
+
+NervesUEvent classifies input devices (touchscreens, keyboards, mice, etc.)
+and writes `/run/udev/data/c<major>:<minor>` files in the format libinput
+reads via libudev or sd-device. This lets libinput recognize input devices
+without udevd running, so `udevd` can be dropped from a Nerves system that
+previously required it just for libinput support.
+
+See `:manage_udev` above to override the auto-detection.
 
 ## Usage
 
