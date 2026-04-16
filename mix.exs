@@ -27,7 +27,8 @@ defmodule NervesUEvent.MixProject do
       package: package(),
       docs: docs(),
       dialyzer: dialyzer(),
-      deps: deps()
+      deps: deps(),
+      aliases: [test: "test --no-start"]
     ]
   end
 

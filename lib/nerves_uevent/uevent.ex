@@ -3,9 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 defmodule NervesUEvent.UEvent do
-  @moduledoc """
-  GenServer that captures Linux uevent messages and passes them up to Elixir.
-  """
+  @moduledoc false
   use GenServer
   require Logger
 
@@ -16,6 +14,15 @@ defmodule NervesUEvent.UEvent do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  @doc """
+  Check whether uevent is even supported on this platform
+  """
+  @spec supported?() :: boolean()
+  def supported?() do
+    executable = Application.app_dir(:nerves_uevent, ["priv", "uevent"])
+    File.exists?(executable)
+  end
+
   @impl GenServer
   def init(opts) do
     autoload = Keyword.get(opts, :autoload_modules, true)
@@ -23,21 +30,16 @@ defmodule NervesUEvent.UEvent do
 
     args = if autoload, do: ["modprobe"], else: []
 
-    if File.exists?(executable) do
-      port =
-        Port.open({:spawn_executable, executable}, [
-          {:args, args},
-          {:packet, 2},
-          :use_stdio,
-          :binary,
-          :exit_status
-        ])
+    port =
+      Port.open({:spawn_executable, executable}, [
+        {:args, args},
+        {:packet, 2},
+        :use_stdio,
+        :binary,
+        :exit_status
+      ])
 
-      {:ok, port}
-    else
-      # Ignore if not on a platform that can build the port binary
-      :ignore
-    end
+    {:ok, port}
   end
 
   @impl GenServer

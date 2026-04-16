@@ -1,0 +1,7 @@
+PRODUCT=0/0/0/0
+NAME="vc4-hdmi-0 HDMI Jack"
+PHYS="ALSA"
+PROP=0
+EV=21
+SW=40
+MODALIAS=input:b0000v0000p0000e0000-e0,5,kramlsfw6,

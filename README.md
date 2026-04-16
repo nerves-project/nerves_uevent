@@ -34,10 +34,14 @@ similar functionality. It's an advanced use case to modify this dependency.
 ## Configuration
 
 NervesUEvent automatically starts on boot. Configuration is supplied via
-application config. The following option is available:
+application config. The following options are available:
 
 * `:autoload_modules` - defaults to `true` to automatically run `modprobe` when
   needed
+* `:manage_udev` - set this to `true` or `false` to force NervesUEvent to
+  manage the `/run/udev` directory. If unset, NervesUEvent manages it if
+  udevd isn't running. Currently, NervesUEvent only maintains input device
+  status for libinput.
 
 Here's a `config.exs` example:
 
