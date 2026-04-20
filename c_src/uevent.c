@@ -2,6 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// Needed for pipe2() on glibc. musl exposes it unconditionally.
+#define _GNU_SOURCE
+
 #include "utils.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -28,11 +31,19 @@
 static int run_modprobe = 0;
 static uint32_t modprobe_queue_n;
 static uint32_t modprobe_queue_index;
-// Experimentation showed that batches max out around 18 modprobe calls and
-// require a max ~700 bytes of buffer. These shouldn't overflow in practice,
-// but are still checked below.
-static char modprobe_queue_buffer[1024];
-static char *modprobe_queue_argv[32];
+// Sized for the boot-time uevent flood. This is far larger than what's
+// currently been observed. Dropped modprobes are not recoverable.
+static char modprobe_queue_buffer[65536];
+static char *modprobe_queue_argv[1024];
+
+// PID of the in-flight modprobe child, or 0 when none. Concurrency is capped
+// at 1: the kernel serializes loads via module_mutex anyway, and allowing
+// unbounded fan-out would let a uevent storm spawn arbitrarily many modprobes.
+static pid_t modprobe_pid = 0;
+
+// Self-pipe so SIGCHLD just wakes the poll loop; reaping and queue-flushing
+// happen in the main loop where async-signal-safety doesn't constrain us.
+static int sigchld_pipe[2] = {-1, -1};
 
 // Cumulative counters reported to Elixir
 struct stats {
@@ -76,6 +87,12 @@ static void run_modprobes()
     if (modprobe_queue_index == 0)
         return;
 
+    // One modprobe in flight at a time. If one's still running, leave the
+    // queue accumulating — the next call (from another uevent batch or from
+    // the SIGCHLD wakeup path) will flush it.
+    if (modprobe_pid != 0)
+        return;
+
     pid_t pid = fork();
     if (pid == 0) {
         // child
@@ -93,20 +110,17 @@ static void run_modprobes()
 
         // Not supposed to reach here.
         exit(EXIT_FAILURE);
-    } else {
+    } else if (pid > 0) {
         // parent
-        int status = -1;
-        int rc;
-        do {
-            rc = waitpid(pid, &status, 0);
-        } while (rc < 0 && errno == EINTR);
-
+        modprobe_pid = pid;
         stats.modprobes_called++;
-        stats_dirty = 1;
-
-        // Ignore errors.
-        reset_modprobe_queue();
+    } else {
+        // fork() failures drop the batch but let uevents keep flowing.
+        stats.modprobe_fork_failures++;
     }
+
+    stats_dirty = 1;
+    reset_modprobe_queue();
 }
 
 static void queue_modprobe(char *modalias)
@@ -117,9 +131,22 @@ static void queue_modprobe(char *modalias)
         strcmp(modprobe_queue_argv[modprobe_queue_n - 1], modalias) == 0)
         return;
 
+    // Leave one argv slot for the trailing NULL that execvp needs.
+    const int argv_max = (int)(sizeof(modprobe_queue_argv) / sizeof(modprobe_queue_argv[0])) - 1;
+
     size_t modalias_len = strlen(modalias) + 1;
-    if (modprobe_queue_index + modalias_len > sizeof(modprobe_queue_buffer)) {
+    if (modprobe_queue_index + modalias_len > sizeof(modprobe_queue_buffer) ||
+        modprobe_queue_n >= argv_max) {
         run_modprobes();
+        // If a modprobe is already in flight, the flush was a no-op and we're
+        // still full. Drop this alias rather than overflow — the same
+        // modalias normally recurs on the next matching uevent.
+        if (modprobe_queue_index + modalias_len > sizeof(modprobe_queue_buffer) ||
+            modprobe_queue_n >= argv_max) {
+            stats.modaliases_dropped++;
+            stats_dirty = 1;
+            return;
+        }
     }
 
     char *p = &modprobe_queue_buffer[modprobe_queue_index];
@@ -237,7 +264,7 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
     char nlbuf[8192]; // See MNL_SOCKET_BUFFER_SIZE
     int bytecount = mnl_socket_recvfrom(nl_uevent, nlbuf, sizeof(nlbuf));
     if (bytecount <= 0) {
-        if (errno == EAGAIN)
+        if (errno == EAGAIN || errno == EINTR)
             return -1;
         if (errno == ENOBUFS) {
             // This doesn't getting printed in a helpful location and
@@ -471,12 +498,43 @@ static void scandirs(char *path, int path_end)
     path[path_end] = 0;
 }
 
-static void discovery_exit_handler(int signum)
+static void sigchld_handler(int signum)
 {
-    // Call wait on the child so that it's not a zombie, but ignore whether
-    // it exited successfully.
+    (void) signum;
+    // Only async-signal-safe work here: poke the self-pipe. The main loop
+    // will wake from poll, reap with WNOHANG, and clear modprobe_pid. If the
+    // write fails (pipe full, EAGAIN) there's already a pending wakeup byte,
+    // so the main loop will still run reap_children — no data is lost.
+    const char b = 0;
+    (void) write(sigchld_pipe[1], &b, 1);
+}
+
+static void reap_children()
+{
     int status;
-    wait(&status);
+    pid_t pid;
+
+    for (;;) {
+        pid = waitpid(-1, &status, WNOHANG);
+        if (pid > 0) {
+            if (pid == modprobe_pid)
+                modprobe_pid = 0;
+            // Other PIDs (the initial discovery fork) are reaped but need no
+            // bookkeeping.
+            continue;
+        }
+
+        if (pid == 0)
+            break;
+
+        if (errno == EINTR)
+            continue;
+
+        if (errno == ECHILD)
+            break;
+
+        break;
+    }
 }
 
 static void uevent_discover()
@@ -497,8 +555,12 @@ int main(int argc, char *argv[])
         run_modprobe = 1;
     }
 
+    // Self-pipe must exist before the SIGCHLD handler can fire.
+    if (pipe2(sigchld_pipe, O_CLOEXEC | O_NONBLOCK) < 0)
+        err(EXIT_FAILURE, "pipe2");
+
     struct sigaction act;
-    act.sa_handler = discovery_exit_handler;
+    act.sa_handler = sigchld_handler;
     sigemptyset (&act.sa_mask);
     act.sa_flags = 0;
     sigaction (SIGCHLD, &act, NULL);
@@ -514,7 +576,7 @@ int main(int argc, char *argv[])
     uevent_discover();
 
     for (;;) {
-        struct pollfd fdset[2];
+        struct pollfd fdset[3];
 
         fdset[0].fd = mnl_socket_get_fd(nl_uevent);
         fdset[0].events = POLLIN;
@@ -524,8 +586,12 @@ int main(int argc, char *argv[])
         fdset[1].events = POLLIN;
         fdset[1].revents = 0;
 
+        fdset[2].fd = sigchld_pipe[0];
+        fdset[2].events = POLLIN;
+        fdset[2].revents = 0;
+
         int timeout = stats_dirty ? 5000 : -1;
-        int rc = poll(fdset, 2, timeout);
+        int rc = poll(fdset, 3, timeout);
         if (rc < 0) {
             // Retry if EINTR
             if (errno == EINTR)
@@ -538,6 +604,17 @@ int main(int argc, char *argv[])
             send_stats();
             stats_dirty = 0;
             continue;
+        }
+
+        if (fdset[2].revents & POLLIN) {
+            // Drain the pipe; the content is irrelevant, only the wakeup is.
+            char drain[64];
+            while (read(sigchld_pipe[0], drain, sizeof(drain)) > 0)
+                ;
+            reap_children();
+            // If a modprobe just finished and more modaliases queued up
+            // while it was running, launch the next batch now.
+            run_modprobes();
         }
 
         if (fdset[0].revents & (POLLIN | POLLHUP))
