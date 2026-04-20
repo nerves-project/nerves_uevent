@@ -61,7 +61,13 @@ defmodule NervesUEvent.InputListener do
   @impl GenServer
   def init(opts) do
     :ok = PropertyTable.subscribe(NervesUEvent, [])
-    {:ok, %{udev_data_dir: udev_data_dir(opts)}, {:continue, :initial_sync}}
+
+    state = %{
+      udev_data_dir: udev_data_dir(opts),
+      input_rules: Keyword.get(opts, :input_rules, [])
+    }
+
+    {:ok, state, {:continue, :initial_sync}}
   end
 
   @impl GenServer
@@ -111,16 +117,33 @@ defmodule NervesUEvent.InputListener do
     # by the time we process the child.
     input_kvmap = PropertyTable.get(NervesUEvent, Enum.drop(property, -1), %{})
     classes = InputId.classify(input_kvmap)
-    _ = write_udev_data(state.udev_data_dir, value, classes)
+    extra_env = rule_env(state.input_rules, input_kvmap)
+    _ = write_udev_data(state.udev_data_dir, value, classes, extra_env)
     Logger.info("Input device added: #{devpath(property)} #{inspect(classes)}")
   end
 
-  defp write_udev_data(udev_data_dir, value, classes) do
+  defp rule_env(rules, kvmap) do
+    Enum.reduce(rules, %{}, fn {match, actions}, acc ->
+      if rule_matches?(match, kvmap) do
+        Map.merge(acc, Keyword.get(actions, :env, %{}))
+      else
+        acc
+      end
+    end)
+  end
+
+  # Subset match: every key in `match` must equal the corresponding value in
+  # `kvmap`. Extra keys in `kvmap` are ignored — same semantics as
+  # `match?(%{...literal pairs...}, kvmap)`.
+  defp rule_matches?(match, kvmap) do
+    Enum.all?(match, fn {k, v} -> Map.get(kvmap, k) == v end)
+  end
+
+  defp write_udev_data(udev_data_dir, value, classes, extra_env) do
     lines =
-      [
-        "E:ID_INPUT=1\n"
-        | Enum.map(classes, &"E:ID_INPUT_#{String.upcase(Atom.to_string(&1))}=1\n")
-      ]
+      ["E:ID_INPUT=1\n"] ++
+        Enum.map(classes, &"E:ID_INPUT_#{String.upcase(Atom.to_string(&1))}=1\n") ++
+        Enum.map(extra_env, fn {k, v} -> "E:#{k}=#{v}\n" end)
 
     File.write(udev_data_file(udev_data_dir, value), lines)
   end

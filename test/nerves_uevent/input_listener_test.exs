@@ -188,8 +188,90 @@ defmodule NervesUEvent.InputListenerTest do
     end
   end
 
-  defp start_listener!(ctx) do
-    pid = start_supervised!({InputListener, udev_dir: ctx.tmp_dir})
+  describe "input_rules" do
+    test "appends E:KEY=VALUE for rules whose match equals the input kvmap", ctx do
+      rules = [
+        {%{"name" => "Dell Dell USB Optical Mouse"},
+         env: %{"LIBINPUT_CALIBRATION_MATRIX" => "0 1 0 -1 0 1"}}
+      ]
+
+      pid = start_listener!(ctx, input_rules: rules)
+
+      parent = ["devices", "platform", "input", "input11"]
+      PropertyTable.put(NervesUEvent, parent, input_kvmap("dell-usb-mouse"))
+      PropertyTable.put(NervesUEvent, parent ++ ["event11"], char_dev("input", "13", "81"))
+      sync(pid)
+
+      contents = File.read!(Path.join(ctx.udev_data_dir, "c13:81"))
+      assert contents =~ "E:ID_INPUT_MOUSE=1\n"
+      assert contents =~ "E:LIBINPUT_CALIBRATION_MATRIX=0 1 0 -1 0 1\n"
+    end
+
+    test "requires all match keys to equal kvmap values", ctx do
+      rules = [
+        {%{"name" => "Dell Dell USB Optical Mouse", "phys" => "does-not-match"},
+         env: %{"FOO" => "bar"}}
+      ]
+
+      pid = start_listener!(ctx, input_rules: rules)
+
+      parent = ["devices", "platform", "input", "input12"]
+      PropertyTable.put(NervesUEvent, parent, input_kvmap("dell-usb-mouse"))
+      PropertyTable.put(NervesUEvent, parent ++ ["event12"], char_dev("input", "13", "82"))
+      sync(pid)
+
+      refute File.read!(Path.join(ctx.udev_data_dir, "c13:82")) =~ "FOO"
+    end
+
+    test "merges env from multiple matching rules, later rules win on conflict", ctx do
+      rules = [
+        {%{"name" => "Dell Dell USB Optical Mouse"}, env: %{"A" => "1", "B" => "first"}},
+        {%{"name" => "Dell Dell USB Optical Mouse"}, env: %{"B" => "second", "C" => "3"}}
+      ]
+
+      pid = start_listener!(ctx, input_rules: rules)
+
+      parent = ["devices", "platform", "input", "input13"]
+      PropertyTable.put(NervesUEvent, parent, input_kvmap("dell-usb-mouse"))
+      PropertyTable.put(NervesUEvent, parent ++ ["event13"], char_dev("input", "13", "83"))
+      sync(pid)
+
+      contents = File.read!(Path.join(ctx.udev_data_dir, "c13:83"))
+      assert contents =~ "E:A=1\n"
+      assert contents =~ "E:B=second\n"
+      assert contents =~ "E:C=3\n"
+    end
+
+    test "applies rules during initial sync replay", ctx do
+      rules = [{%{"name" => "Microsoft X-Box 360 pad"}, env: %{"JOYSTICK_QUIRK" => "yes"}}]
+
+      parent = ["devices", "pci", "input", "input14"]
+      PropertyTable.put(NervesUEvent, parent, input_kvmap("xbox-360-pad"))
+      PropertyTable.put(NervesUEvent, parent ++ ["js0"], char_dev("input", "13", "84"))
+
+      _ = start_listener!(ctx, input_rules: rules)
+
+      contents = File.read!(Path.join(ctx.udev_data_dir, "c13:84"))
+      assert contents =~ "E:JOYSTICK_QUIRK=yes\n"
+    end
+
+    test "rules with no :env action are a no-op but still valid", ctx do
+      rules = [{%{"name" => "Dell Dell USB Optical Mouse"}, []}]
+      pid = start_listener!(ctx, input_rules: rules)
+
+      parent = ["devices", "platform", "input", "input15"]
+      PropertyTable.put(NervesUEvent, parent, input_kvmap("dell-usb-mouse"))
+      PropertyTable.put(NervesUEvent, parent ++ ["event15"], char_dev("input", "13", "85"))
+      sync(pid)
+
+      contents = File.read!(Path.join(ctx.udev_data_dir, "c13:85"))
+      assert contents =~ "E:ID_INPUT_MOUSE=1\n"
+    end
+  end
+
+  defp start_listener!(ctx, extra_opts \\ []) do
+    opts = Keyword.merge([udev_dir: ctx.tmp_dir], extra_opts)
+    pid = start_supervised!({InputListener, opts})
     sync(pid)
     pid
   end

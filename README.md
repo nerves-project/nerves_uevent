@@ -13,11 +13,14 @@
 NervesUEvent listens for events from the Linux kernel, automatically loads
 device drivers, and forwards them to your Elixir programs.
 
-NervesUEvent is a very simple version of the Linux `udevd`. Just like `udevd`
-does for desktop Linux, NervesUEvent registers to receive UEvents from the Linux
-kernel. Unlike `udevd`, NervesUEvent only runs `modprobe` when needed and keeps
-track of what hardware is in the system. For most Nerves use cases, `udevd`
-isn't needed.
+NervesUEvent supports a small subset of Linux's `udevd`. This subset is
+sufficient for many Nerves use cases and you can add listeners that respond
+similar to what udev's rules files do. Supported features:
+
+* Load kernel modules on demand
+* Categorize input devices for programs using libinput
+* Support a PropertyTable-style interface detecting device insertions and
+  removals in Elixir
 
 > #### Warning {: .warning}
 >
@@ -42,11 +45,27 @@ application config. The following options are available:
   manage the `/run/udev` directory. If unset, NervesUEvent manages it if
   udevd isn't running. Currently, NervesUEvent only maintains input device
   status for libinput.
+* `:input_rules` - a list of `{match, actions}` tuples applied to each input
+  device. `match` is a map of `field => value` pairs with string keys,
+  compared as a subset against the inputN uevent (e.g. `"name"`, `"phys"`,
+  `"uniq"`) — every key in `match` must equal the kvmap's value. `actions`
+  is a keyword list of actions to apply on match. Currently the only
+  supported action is `:env`, a map of property name to value that gets
+  appended as `E:KEY=VALUE` lines in `/run/udev/data/c<major>:<minor>`.
+  Multiple matching rules merge their env; later rules win on conflicting
+  keys.
 
 Here's a `config.exs` example:
 
 ```elixir
-config :nerves_uevent, autoload_modules: false
+# Rotate a touchscreen by setting libinput's calibration matrix. Matrix
+# values: 0° = "1 0 0 0 1 0", 90° CW = "0 -1 1 1 0 0",
+# 180° = "-1 0 1 0 -1 1", 270° CW = "0 1 0 -1 0 1"
+config :nerves_uevent,
+  input_rules: [
+    {%{"name" => "TSTP MTouch"},
+     env: %{"LIBINPUT_CALIBRATION_MATRIX" => "0 1 0 -1 0 1"}}
+  ]
 ```
 
 ## Usage
