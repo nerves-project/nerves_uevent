@@ -14,6 +14,46 @@ defmodule NervesUEvent do
   isn't needed.
   """
 
+  @typedoc """
+  Uevent action type counters
+  """
+  @type action_stats() :: %{
+          add: non_neg_integer(),
+          change: non_neg_integer(),
+          remove: non_neg_integer(),
+          move: non_neg_integer(),
+          bind: non_neg_integer(),
+          unbind: non_neg_integer(),
+          other: non_neg_integer()
+        }
+
+  @typedoc """
+  UEvent collection counters
+
+  * `:uevents_received` — netlink messages successfully read
+  * `:uevents_dropped` — ENOBUFS incidents (kernel dropped one or more messages)
+  * `:modprobes_called` — modprobe child processes launched
+  * `:modaliases_queued` — modaliases queued for modprobe
+  * `:modaliases_dropped` — modaliases dropped because the queue was full
+    while a modprobe was already in flight
+  * `:modprobe_fork_failures` — `fork()` failures when launching modprobe
+  * `:peak_queue_n` — high-water mark for queued modalias count
+  * `:peak_queue_bytes` — high-water mark for the modalias byte buffer
+  * `:actions` — nested map of `add | change | remove | move | bind | unbind | other`
+    counts, matching the uevent ACTION field
+  """
+  @type stats() :: %{
+          uevents_received: non_neg_integer(),
+          uevents_dropped: non_neg_integer(),
+          modprobes_called: non_neg_integer(),
+          modaliases_queued: non_neg_integer(),
+          modaliases_dropped: non_neg_integer(),
+          modprobe_fork_failures: non_neg_integer(),
+          peak_queue_n: non_neg_integer(),
+          peak_queue_bytes: non_neg_integer(),
+          actions: action_stats()
+        }
+
   @doc """
   Get all reported UEvents
   """
@@ -59,24 +99,9 @@ defmodule NervesUEvent do
   @doc """
   Return counters collected by the uevent port.
 
-  Top-level keys:
-
-    * `:uevents_received` — netlink messages successfully read
-    * `:uevents_dropped` — ENOBUFS incidents (kernel dropped one or more messages)
-    * `:modprobes_called` — modprobe child processes launched
-    * `:modaliases_queued` — modaliases queued for modprobe
-    * `:modaliases_dropped` — modaliases dropped because the queue was full
-      while a modprobe was already in flight
-    * `:modprobe_fork_failures` — `fork()` failures when launching modprobe
-    * `:peak_queue_n` — high-water mark for queued modalias count
-    * `:peak_queue_bytes` — high-water mark for the modalias byte buffer
-    * `:actions` — nested map of `add | change | remove | move | bind | unbind | other`
-      counts, matching the uevent ACTION field
-
-  Counters are cumulative since the port started and are 32-bit. The port
-  pushes snapshots after ~5 s of netlink idle, so values may lag during a
-  uevent burst.
+  Counters are cumulative since the port started and updated after 5 seconds of
+  inactivity.  Values will lag bursts especially at boot.
   """
-  @spec stats() :: NervesUEvent.UEvent.stats()
-  def stats(), do: NervesUEvent.UEvent.stats()
+  @spec stats() :: NervesUEvent.stats()
+  def stats(), do: NervesUEvent.stats()
 end

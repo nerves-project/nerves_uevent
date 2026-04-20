@@ -9,28 +9,6 @@ defmodule NervesUEvent.UEvent do
 
   @type option() :: {:autoload_modules, boolean()}
 
-  @type action_stats() :: %{
-          add: non_neg_integer(),
-          change: non_neg_integer(),
-          remove: non_neg_integer(),
-          move: non_neg_integer(),
-          bind: non_neg_integer(),
-          unbind: non_neg_integer(),
-          other: non_neg_integer()
-        }
-
-  @type stats() :: %{
-          uevents_received: non_neg_integer(),
-          uevents_dropped: non_neg_integer(),
-          modprobes_called: non_neg_integer(),
-          modaliases_queued: non_neg_integer(),
-          modaliases_dropped: non_neg_integer(),
-          modprobe_fork_failures: non_neg_integer(),
-          peak_queue_n: non_neg_integer(),
-          peak_queue_bytes: non_neg_integer(),
-          actions: action_stats()
-        }
-
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -51,7 +29,7 @@ defmodule NervesUEvent.UEvent do
   The port pushes an updated snapshot after ~5 s of netlink idle, so the
   returned map may lag real counts during a uevent burst.
   """
-  @spec stats() :: stats()
+  @spec stats() :: NervesUEvent.stats()
   def stats(), do: GenServer.call(__MODULE__, :stats)
 
   @impl GenServer
