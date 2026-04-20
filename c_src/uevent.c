@@ -26,13 +26,42 @@
 #include <ei.h>
 
 static int run_modprobe = 0;
-static int modprobe_queue_n;
-static int modprobe_queue_index;
+static uint32_t modprobe_queue_n;
+static uint32_t modprobe_queue_index;
 // Experimentation showed that batches max out around 18 modprobe calls and
 // require a max ~700 bytes of buffer. These shouldn't overflow in practice,
 // but are still checked below.
 static char modprobe_queue_buffer[1024];
 static char *modprobe_queue_argv[32];
+
+// Cumulative counters reported to Elixir
+struct stats {
+    uint32_t uevents_received;
+    // Kernel buffer-overflow incidents (ENOBUFS). This indicates lost events
+    // and is a serious error since it's unrecoverable without restarting.
+    uint32_t uevents_dropped;
+
+    uint32_t modprobes_called;
+    uint32_t modaliases_queued;
+    uint32_t modaliases_dropped;
+    uint32_t modprobe_fork_failures;
+
+    // High-water marks for the modprobe queue for tuning
+    uint32_t peak_queue_n;
+    uint32_t peak_queue_bytes;
+
+    // Per-action tallies
+    uint32_t action_add;
+    uint32_t action_change;
+    uint32_t action_remove;
+    uint32_t action_move;
+    uint32_t action_bind;
+    uint32_t action_unbind;
+    uint32_t action_other;
+};
+
+static struct stats stats;
+static int stats_dirty = 0;
 
 static void reset_modprobe_queue()
 {
@@ -72,6 +101,9 @@ static void run_modprobes()
             rc = waitpid(pid, &status, 0);
         } while (rc < 0 && errno == EINTR);
 
+        stats.modprobes_called++;
+        stats_dirty = 1;
+
         // Ignore errors.
         reset_modprobe_queue();
     }
@@ -96,6 +128,12 @@ static void queue_modprobe(char *modalias)
     strcpy(p, modalias);
     modprobe_queue_index += modalias_len;
     modprobe_queue_n++;
+    stats.modaliases_queued++;
+    if (modprobe_queue_n > stats.peak_queue_n)
+        stats.peak_queue_n = modprobe_queue_n;
+    if (modprobe_queue_index > stats.peak_queue_bytes)
+        stats.peak_queue_bytes = modprobe_queue_index;
+    stats_dirty = 1;
 }
 
 static void erlcmd_write_header_len(char *response, size_t len)
@@ -207,10 +245,15 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
             // useful when debugging if messages are suspected to have
             // been dropped.
             // warnx("mnl_socket_recvfrom: netlink messages dropped");
+            stats.uevents_dropped++;
+            stats_dirty = 1;
             return -1;
         }
         err(EXIT_FAILURE, "mnl_socket_recvfrom");
     }
+
+    stats.uevents_received++;
+    stats_dirty = 1;
 
     char *str = nlbuf;
     char *str_end = str + bytecount;
@@ -239,6 +282,14 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
     // action
     const char *action = str;
     ei_encode_atom(resp, &resp_index, str);
+
+    if (strcmp(action, "add") == 0) stats.action_add++;
+    else if (strcmp(action, "change") == 0) stats.action_change++;
+    else if (strcmp(action, "remove") == 0) stats.action_remove++;
+    else if (strcmp(action, "move") == 0) stats.action_move++;
+    else if (strcmp(action, "bind") == 0) stats.action_bind++;
+    else if (strcmp(action, "unbind") == 0) stats.action_unbind++;
+    else stats.action_other++;
 
     // devpath - filter anything that's not under "/devices"
     str = atsign + 1;
@@ -289,6 +340,55 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
     }
     erlcmd_write_header_len(resp, resp_index);
     return resp_index;
+}
+
+static void send_stats()
+{
+    // 1 KB easily covers the encoded map — 8 scalars plus a nested 7-entry
+    // action submap, each value a u32 and each key a short atom.
+    char resp[1024];
+    int resp_index = sizeof(uint16_t); // skip over the 2-byte length prefix
+    ei_encode_version(resp, &resp_index);
+    ei_encode_tuple_header(resp, &resp_index, 2);
+    ei_encode_atom(resp, &resp_index, "stats");
+    ei_encode_map_header(resp, &resp_index, 9);
+
+    ei_encode_atom(resp, &resp_index, "uevents_received");
+    ei_encode_ulong(resp, &resp_index, stats.uevents_received);
+    ei_encode_atom(resp, &resp_index, "uevents_dropped");
+    ei_encode_ulong(resp, &resp_index, stats.uevents_dropped);
+    ei_encode_atom(resp, &resp_index, "modprobes_called");
+    ei_encode_ulong(resp, &resp_index, stats.modprobes_called);
+    ei_encode_atom(resp, &resp_index, "modaliases_queued");
+    ei_encode_ulong(resp, &resp_index, stats.modaliases_queued);
+    ei_encode_atom(resp, &resp_index, "modaliases_dropped");
+    ei_encode_ulong(resp, &resp_index, stats.modaliases_dropped);
+    ei_encode_atom(resp, &resp_index, "modprobe_fork_failures");
+    ei_encode_ulong(resp, &resp_index, stats.modprobe_fork_failures);
+    ei_encode_atom(resp, &resp_index, "peak_queue_n");
+    ei_encode_ulong(resp, &resp_index, stats.peak_queue_n);
+    ei_encode_atom(resp, &resp_index, "peak_queue_bytes");
+    ei_encode_ulong(resp, &resp_index, stats.peak_queue_bytes);
+
+    ei_encode_atom(resp, &resp_index, "actions");
+    ei_encode_map_header(resp, &resp_index, 7);
+    ei_encode_atom(resp, &resp_index, "add");
+    ei_encode_ulong(resp, &resp_index, stats.action_add);
+    ei_encode_atom(resp, &resp_index, "change");
+    ei_encode_ulong(resp, &resp_index, stats.action_change);
+    ei_encode_atom(resp, &resp_index, "remove");
+    ei_encode_ulong(resp, &resp_index, stats.action_remove);
+    ei_encode_atom(resp, &resp_index, "move");
+    ei_encode_ulong(resp, &resp_index, stats.action_move);
+    ei_encode_atom(resp, &resp_index, "bind");
+    ei_encode_ulong(resp, &resp_index, stats.action_bind);
+    ei_encode_atom(resp, &resp_index, "unbind");
+    ei_encode_ulong(resp, &resp_index, stats.action_unbind);
+    ei_encode_atom(resp, &resp_index, "other");
+    ei_encode_ulong(resp, &resp_index, stats.action_other);
+
+    erlcmd_write_header_len(resp, resp_index);
+    write_all(resp, resp_index);
 }
 
 static void nl_uevent_process_all(struct mnl_socket *nl_uevent)
@@ -424,13 +524,20 @@ int main(int argc, char *argv[])
         fdset[1].events = POLLIN;
         fdset[1].revents = 0;
 
-        int rc = poll(fdset, 2, -1);
+        int timeout = stats_dirty ? 5000 : -1;
+        int rc = poll(fdset, 2, timeout);
         if (rc < 0) {
             // Retry if EINTR
             if (errno == EINTR)
                 continue;
 
             err(EXIT_FAILURE, "poll");
+        }
+
+        if (rc == 0 && stats_dirty) {
+            send_stats();
+            stats_dirty = 0;
+            continue;
         }
 
         if (fdset[0].revents & (POLLIN | POLLHUP))

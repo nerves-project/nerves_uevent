@@ -55,4 +55,28 @@ defmodule NervesUEvent do
   """
   @spec subscribe(PropertyTable.pattern()) :: :ok
   def subscribe(property), do: PropertyTable.subscribe(NervesUEvent, property)
+
+  @doc """
+  Return counters collected by the uevent port.
+
+  Top-level keys:
+
+    * `:uevents_received` — netlink messages successfully read
+    * `:uevents_dropped` — ENOBUFS incidents (kernel dropped one or more messages)
+    * `:modprobes_called` — modprobe child processes launched
+    * `:modaliases_queued` — modaliases queued for modprobe
+    * `:modaliases_dropped` — modaliases dropped because the queue was full
+      while a modprobe was already in flight
+    * `:modprobe_fork_failures` — `fork()` failures when launching modprobe
+    * `:peak_queue_n` — high-water mark for queued modalias count
+    * `:peak_queue_bytes` — high-water mark for the modalias byte buffer
+    * `:actions` — nested map of `add | change | remove | move | bind | unbind | other`
+      counts, matching the uevent ACTION field
+
+  Counters are cumulative since the port started and are 32-bit. The port
+  pushes snapshots after ~5 s of netlink idle, so values may lag during a
+  uevent burst.
+  """
+  @spec stats() :: NervesUEvent.UEvent.stats()
+  def stats(), do: NervesUEvent.UEvent.stats()
 end
