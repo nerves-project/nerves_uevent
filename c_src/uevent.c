@@ -506,7 +506,7 @@ static void sigchld_handler(int signum)
     // write fails (pipe full, EAGAIN) there's already a pending wakeup byte,
     // so the main loop will still run reap_children — no data is lost.
     const char b = 0;
-    (void) write(sigchld_pipe[1], &b, 1);
+    if (write(sigchld_pipe[1], &b, 1) < 0) { /* intentionally ignored */ }
 }
 
 static void reap_children()
