@@ -5,6 +5,19 @@
 
 # Changelog
 
+## v0.1.4 - 2026-04-20
+
+* New feature
+  * Support `libinput` by managing the `/run/udev` directory for input devices.
+    This means that `eudev` or the like are no longer required for web kiosks,
+    Flutter or other UI frameworks that use `libinput`.
+  * Add `NervesUEvent.stats/0` for getting uevent report counters and more.
+
+* Bug fixes
+  * Fix possible dropped uevents due to `modprobe` delaying processing too much.
+    `modprobe` is now called asynchrnously and modalias strings are queued for
+    batch processing when it completes.
+
 ## v0.1.3 - 2026-04-10
 
 * Updates
