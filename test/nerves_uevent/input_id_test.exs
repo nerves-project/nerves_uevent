@@ -14,6 +14,10 @@ defmodule NervesUEvent.InputIdTest do
       assert classify_fixture("byqdtech-touchscreen") == [:touchscreen]
     end
 
+    test "multi-touch touchscreen with BTN_TOUCH, ABS_MT_POSITION_X/Y, and PROP_DIRECT" do
+      assert classify_fixture("tstp-mtouch-touchscreen") == [:touchscreen]
+    end
+
     test "relative-axis mouse with BTN_LEFT" do
       assert classify_fixture("dell-usb-mouse") == [:mouse]
     end
