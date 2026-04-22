@@ -350,11 +350,22 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
         // We like lowercase keys
         str_tolower(str);
         keys[kvpairs_count] = str;
-        values[kvpairs_count] = equalsign + 1;
+
+        // The kernel wraps some values in literal double quotes — notably
+        // NAME, PHYS, and UNIQ on input devices (see drivers/input/input.c).
+        // Strip them so downstream rule matching compares against the
+        // natural string.
+        char *value = equalsign + 1;
+        size_t value_len = strlen(value);
+        if (value_len >= 2 && value[0] == '"' && value[value_len - 1] == '"') {
+            value[value_len - 1] = '\0';
+            value++;
+        }
+        values[kvpairs_count] = value;
 
         // Optionally run modprobe on newly added devices that have a modalias
         if (run_modprobe && strcmp(str, "modalias") == 0 && strcmp(action, "add") == 0) {
-            queue_modprobe(equalsign + 1);
+            queue_modprobe(value);
         }
 
         kvpairs_count++;
