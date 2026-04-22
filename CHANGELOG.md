@@ -5,6 +5,13 @@
 
 # Changelog
 
+## v0.1.5 - 2026-04-21
+
+* New feature
+  * Support adding custom udev environment lines to input devices. See README.md
+    for details. This adds support for things like rotating a touchscreen's
+    touch coordinates to match a rotate display output.
+
 ## v0.1.4 - 2026-04-20
 
 * New feature
