@@ -21,9 +21,9 @@ defmodule NervesUEvent.InputListener do
     manage_run_udev?(opts) and writable_dir?(udev_data_dir(opts))
   end
 
-  defp udev_data_dir(opts) do
-    Path.join(Keyword.get(opts, :udev_dir, @default_udev_dir), "data")
-  end
+  defp udev_dir(opts), do: Keyword.get(opts, :udev_dir, @default_udev_dir)
+  defp udev_data_dir(opts), do: Path.join(udev_dir(opts), "data")
+  defp udev_control_path(opts), do: Path.join(udev_dir(opts), "control")
 
   defp writable_dir?(path) do
     case File.stat(path) do
@@ -39,21 +39,29 @@ defmodule NervesUEvent.InputListener do
         value
 
       :error ->
-        if File.exists?("/run/udev/control") do
-          Logger.warning("""
-          udevd appears to be running (/run/udev/control exists). NervesUEvent's \
-          input-device management is disabled to avoid conflicts.
+        # systemd-udevd creates /run/udev/control as a Unix socket; libudev
+        # treats that file's existence as the signal that "a udev instance is
+        # running" and only then subscribes to NETLINK_KOBJECT_UEVENT group 2.
+        # We advertise ourselves the same way (see handle_continue/2), but
+        # using a regular file so we can tell our marker apart from a real
+        # udevd's socket on a warm BEAM restart.
+        case File.lstat(udev_control_path(opts)) do
+          {:ok, %{type: :other}} ->
+            Logger.warning("""
+            udevd appears to be running (/run/udev/control is a socket). \
+            NervesUEvent's input-device management is disabled to avoid conflicts.
 
-          To replace udevd with NervesUEvent:
-              config :nerves_uevent, manage_udev: true
+            To replace udevd with NervesUEvent:
+                config :nerves_uevent, manage_udev: true
 
-          To keep udevd and silence this warning:
-              config :nerves_uevent, manage_udev: false\
-          """)
+            To keep udevd and silence this warning:
+                config :nerves_uevent, manage_udev: false\
+            """)
 
-          false
-        else
-          true
+            false
+
+          _ ->
+            true
         end
     end
   end
@@ -64,6 +72,7 @@ defmodule NervesUEvent.InputListener do
 
     state = %{
       udev_data_dir: udev_data_dir(opts),
+      udev_control_path: udev_control_path(opts),
       input_rules: Keyword.get(opts, :input_rules, [])
     }
 
@@ -75,6 +84,12 @@ defmodule NervesUEvent.InputListener do
     # Clear out any previous state
     _ = File.rm_rf(state.udev_data_dir)
     File.mkdir_p!(state.udev_data_dir)
+
+    # Advertise as a running udev instance so libudev clients (libinput,
+    # udevadm) actually subscribe to NETLINK_KOBJECT_UEVENT group 2. Without
+    # this, sd_device_monitor_new sets group=NONE and never receives our
+    # broadcasts. F_OK is all libudev checks — a regular file suffices.
+    _ = File.touch(state.udev_control_path)
 
     # Replay char-device input nodes already in the table. Handles a listener
     # restart after UEvent has populated the table. Any events queued between
@@ -100,6 +115,7 @@ defmodule NervesUEvent.InputListener do
   def handle_info(%PropertyTable.Event{value: nil} = event, state) do
     if input_char_device?(event.previous_value) do
       _ = File.rm(udev_data_file(state.udev_data_dir, event.previous_value))
+      remove_device(event.property, event.previous_value)
       Logger.info("Input device removed: #{devpath(event.property)}")
     end
 
@@ -119,8 +135,44 @@ defmodule NervesUEvent.InputListener do
     classes = InputId.classify(input_kvmap)
     extra_env = rule_env(state.input_rules, input_kvmap)
     _ = write_udev_data(state.udev_data_dir, value, classes, extra_env)
+
+    # Libinput's quirks DB also keys on NAME/PHYS/UNIQ/PRODUCT, which live
+    # on the parent inputN, not the eventN node — pull those forward.
+    parent = Map.take(input_kvmap, ["name", "phys", "uniq", "product"])
+
+    classifications = Map.new(classes, fn c -> {classification_key(c), "1"} end)
+
+    extras = Map.new(extra_env, fn {k, v} -> {to_string(k), to_string(v)} end)
+
+    props =
+      base_props("add", property)
+      |> Map.merge(upcase_keys(parent))
+      |> Map.merge(upcase_keys(value))
+      |> Map.put("ID_INPUT", "1")
+      |> Map.merge(classifications)
+      |> Map.merge(extras)
+
+    NervesUEvent.UEvent.broadcast(props)
     Logger.info("Input device added: #{devpath(property)} #{inspect(classes)}")
   end
+
+  defp remove_device(property, previous_value) do
+    props =
+      base_props("remove", property)
+      |> Map.merge(upcase_keys(previous_value))
+
+    NervesUEvent.UEvent.broadcast(props)
+  end
+
+  defp base_props(action, property) do
+    %{
+      "ACTION" => action,
+      "DEVPATH" => devpath(property),
+      "SUBSYSTEM" => "input"
+    }
+  end
+
+  defp upcase_keys(map), do: Map.new(map, fn {k, v} -> {String.upcase(k), v} end)
 
   defp rule_env(rules, kvmap) do
     Enum.reduce(rules, %{}, fn {match, actions}, acc ->
@@ -142,11 +194,13 @@ defmodule NervesUEvent.InputListener do
   defp write_udev_data(udev_data_dir, value, classes, extra_env) do
     lines =
       ["E:ID_INPUT=1\n"] ++
-        Enum.map(classes, &"E:ID_INPUT_#{String.upcase(Atom.to_string(&1))}=1\n") ++
+        Enum.map(classes, &"E:#{classification_key(&1)}=1\n") ++
         Enum.map(extra_env, fn {k, v} -> "E:#{k}=#{v}\n" end)
 
     File.write(udev_data_file(udev_data_dir, value), lines)
   end
+
+  defp classification_key(class), do: "ID_INPUT_#{class |> Atom.to_string() |> String.upcase()}"
 
   # MAJOR/MINOR are only present for the char-device children of inputN
   # (event*, js*, mouse*). The logical inputN node has no dev file and
