@@ -8,6 +8,7 @@
 #include "utils.h"
 #include <ctype.h>
 #include <dirent.h>
+#include <endian.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -19,10 +20,12 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <libmnl/libmnl.h>
+#include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <linux/limits.h>
 
@@ -257,6 +260,189 @@ static int ei_encode_devpath(char * buf, int *index, char *devpath, char **end_d
         ei_encode_elixir_string(buf, index, segments[ix]);
 
     return ei_encode_empty_list(buf, index);
+}
+
+// libudev's on-the-wire framing for events broadcast on
+// NETLINK_KOBJECT_UEVENT group 2. Magic and the hash/bloom fields are stored
+// in network byte order so the in-kernel BPF filter that libudev clients
+// install reads them portably; the size/offset fields are host order. Format
+// matches systemd's `monitor_netlink_header` in
+// src/libsystemd/sd-device/device-monitor.c.
+struct udev_monitor_netlink_header {
+    char     prefix[8];               // "libudev\0"
+    unsigned magic;                   // be32(0xfeedcafe)
+    unsigned header_size;             // sizeof(struct ...)
+    unsigned properties_off;          // = header_size
+    unsigned properties_len;          // length of KEY=val\0 blob
+    unsigned filter_subsystem_hash;   // be32(murmur2(SUBSYSTEM))
+    unsigned filter_devtype_hash;     // be32(murmur2(DEVTYPE)) or 0
+    unsigned filter_tag_bloom_hi;     // 0 — no TAGS=
+    unsigned filter_tag_bloom_lo;
+};
+
+#define UDEV_MONITOR_MAGIC 0xfeedcafe
+#define UDEV_MONITOR_UDEV  2 // nl_groups bit for userspace-to-userspace events
+
+// MurmurHash2, seed=0. Matches systemd's string_hash32() so the BPF filter
+// libudev clients install (which compares be32 hashes of subscribed
+// subsystem/devtype against these header fields) accepts our messages.
+static unsigned murmur_hash2(const char *key, size_t len)
+{
+    const uint32_t m = 0x5bd1e995;
+    const int r = 24;
+    uint32_t h = (uint32_t)len; // seed=0
+    const unsigned char *data = (const unsigned char *)key;
+
+    while (len >= 4) {
+        uint32_t k;
+        memcpy(&k, data, 4);
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+        h *= m;
+        h ^= k;
+        data += 4;
+        len -= 4;
+    }
+    switch (len) {
+    case 3: h ^= (uint32_t)data[2] << 16; /* fallthrough */
+    case 2: h ^= (uint32_t)data[1] << 8;  /* fallthrough */
+    case 1: h ^= (uint32_t)data[0];
+            h *= m;
+    }
+    h ^= h >> 13;
+    h *= m;
+    h ^= h >> 15;
+    return h;
+}
+
+// Linear scan over a KEY=val\0KEY=val\0... blob. Returns a pointer to the
+// value (still inside body) or NULL.
+static const char *find_property(const char *body, size_t body_len, const char *key)
+{
+    size_t klen = strlen(key);
+    const char *p = body;
+    const char *end = body + body_len;
+
+    while (p < end) {
+        size_t plen = strnlen(p, end - p);
+        if (plen > klen && p[klen] == '=' && memcmp(p, key, klen) == 0)
+            return p + klen + 1;
+        p += plen + 1;
+    }
+    return NULL;
+}
+
+static void broadcast_udev_event(struct mnl_socket *nl, const char *body, size_t body_len)
+{
+    struct udev_monitor_netlink_header hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    memcpy(hdr.prefix, "libudev", 8);
+    hdr.magic = htobe32(UDEV_MONITOR_MAGIC);
+    hdr.header_size = sizeof(hdr);
+    hdr.properties_off = sizeof(hdr);
+    hdr.properties_len = body_len;
+
+    const char *subsystem = find_property(body, body_len, "SUBSYSTEM");
+    if (subsystem)
+        hdr.filter_subsystem_hash = htobe32(murmur_hash2(subsystem, strlen(subsystem)));
+
+    const char *devtype = find_property(body, body_len, "DEVTYPE");
+    if (devtype)
+        hdr.filter_devtype_hash = htobe32(murmur_hash2(devtype, strlen(devtype)));
+
+    struct sockaddr_nl dst;
+    memset(&dst, 0, sizeof(dst));
+    dst.nl_family = AF_NETLINK;
+    dst.nl_pid = 0;
+    dst.nl_groups = UDEV_MONITOR_UDEV;
+
+    struct iovec iov[2];
+    iov[0].iov_base = &hdr;
+    iov[0].iov_len = sizeof(hdr);
+    iov[1].iov_base = (void *)body;
+    iov[1].iov_len = body_len;
+
+    struct msghdr m;
+    memset(&m, 0, sizeof(m));
+    m.msg_name = &dst;
+    m.msg_namelen = sizeof(dst);
+    m.msg_iov = iov;
+    m.msg_iovlen = 2;
+
+    int fd = mnl_socket_get_fd(nl);
+    ssize_t n = sendmsg(fd, &m, 0);
+    if (n < 0)
+        debug("sendmsg(udev broadcast) failed: %s", strerror(errno));
+}
+
+// Read exactly `n` bytes from `fd` into `buf`. Returns 0 on success, -1 on
+// EOF or unrecoverable error.
+static int read_exact(int fd, void *buf, size_t n)
+{
+    char *p = buf;
+    while (n > 0) {
+        ssize_t r = read(fd, p, n);
+        if (r == 0)
+            return -1;
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        p += r;
+        n -= (size_t)r;
+    }
+    return 0;
+}
+
+// Erlang Port {:packet, 2} frames each command with a 2-byte big-endian
+// length prefix. Returns 0 on success / unknown command, -1 on EOF or fatal
+// error (caller should exit).
+static int handle_erlang_command(int fd, struct mnl_socket *nl)
+{
+    uint16_t be_len;
+    if (read_exact(fd, &be_len, sizeof(be_len)) < 0)
+        return -1;
+    size_t len = ntohs(be_len);
+
+    char buf[8192];
+    if (len > sizeof(buf))
+        return -1;
+
+    if (read_exact(fd, buf, len) < 0)
+        return -1;
+
+    int idx = 0;
+    int version = 0;
+    if (ei_decode_version(buf, &idx, &version) < 0)
+        return 0;
+
+    int arity = 0;
+    if (ei_decode_tuple_header(buf, &idx, &arity) < 0 || arity != 2)
+        return 0;
+
+    char atom[MAXATOMLEN];
+    if (ei_decode_atom(buf, &idx, atom) < 0)
+        return 0;
+
+    if (strcmp(atom, "broadcast") == 0) {
+        int type = 0, size = 0;
+        if (ei_get_type(buf, &idx, &type, &size) < 0)
+            return 0;
+        if (type != ERL_BINARY_EXT || (size_t)size > sizeof(buf))
+            return 0;
+
+        // The decoded body is bounded by the framed message size, which is
+        // already capped at sizeof(buf) above. Stack-allocate to avoid a
+        // malloc/free per broadcast.
+        char body[sizeof(buf)];
+        long got = 0;
+        if (ei_decode_binary(buf, &idx, body, &got) == 0 && got > 0)
+            broadcast_udev_event(nl, body, (size_t)got);
+    }
+
+    return 0;
 }
 
 static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
@@ -631,9 +817,15 @@ int main(int argc, char *argv[])
         if (fdset[0].revents & (POLLIN | POLLHUP))
             nl_uevent_process_all(nl_uevent);
 
-        // Any notification from Erlang is to exit
-        if (fdset[1].revents & (POLLIN | POLLHUP))
+        // EOF on stdin (BEAM has gone away) = exit. POLLIN may be a
+        // {:broadcast, body} command from Elixir; if read_exact fails it
+        // returns -1 and we exit too.
+        if (fdset[1].revents & POLLHUP)
             break;
+        if (fdset[1].revents & POLLIN) {
+            if (handle_erlang_command(STDIN_FILENO, nl_uevent) < 0)
+                break;
+        }
     }
 
     mnl_socket_close(nl_uevent);

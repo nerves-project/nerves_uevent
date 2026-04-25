@@ -32,6 +32,19 @@ defmodule NervesUEvent.UEvent do
   @spec stats() :: NervesUEvent.stats()
   def stats(), do: GenServer.call(__MODULE__, :stats)
 
+  @doc """
+  Broadcast a synthetic udev event on NETLINK_KOBJECT_UEVENT group 2.
+
+  Properties are KEY => VAL strings (uppercase keys, per udev convention).
+  Must include at least `"ACTION"`, `"DEVPATH"`, and `"SUBSYSTEM"` for
+  libudev clients to filter and dispatch the event correctly. No-op when
+  the C port isn't running (e.g. on non-Linux hosts).
+  """
+  @spec broadcast(%{String.t() => String.t()}) :: :ok
+  def broadcast(props) when is_map(props) do
+    GenServer.cast(__MODULE__, {:broadcast, props})
+  end
+
   @impl GenServer
   def init(opts) do
     autoload = Keyword.get(opts, :autoload_modules, true)
@@ -76,6 +89,17 @@ defmodule NervesUEvent.UEvent do
   @impl GenServer
   def handle_call(:stats, _from, state) do
     {:reply, state.stats, state}
+  end
+
+  @impl GenServer
+  def handle_cast({:broadcast, props}, state) do
+    body =
+      props
+      |> Enum.flat_map(fn {k, v} -> [k, ?=, v, 0] end)
+      |> IO.iodata_to_binary()
+
+    _ = Port.command(state.port, :erlang.term_to_binary({:broadcast, body}))
+    {:noreply, state}
   end
 
   @impl GenServer
