@@ -5,6 +5,12 @@
 
 # Changelog
 
+## v0.1.6 - 2026-05-08
+
+* New feature
+  * Support "group 2" udev notifications so that hot plugging input devices
+    triggers applications using libinput to see the new device.
+
 ## v0.1.5 - 2026-04-21
 
 * New feature
