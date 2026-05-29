@@ -510,12 +510,17 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
         return 0;
     ei_encode_devpath(resp, &resp_index, str, &str);
 
-#define MAX_KV_PAIRS 16
+    // Most report <16 pairs. One battery had 20 properties after filtering.
+#define MAX_KV_PAIRS 64
     int kvpairs_count = 0;
     char *keys[MAX_KV_PAIRS];
     char *values[MAX_KV_PAIRS];
 
     for (; str < str_end; str += strlen(str) + 1) {
+        // Silently drop kv pairs rather than overflow.
+        if (kvpairs_count >= MAX_KV_PAIRS)
+            break;
+
         // Don't encode these keys in the map:
         //
         // ACTION: already delivered
