@@ -540,6 +540,19 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
 
         // We like lowercase keys
         str_tolower(str);
+
+        // Skip duplicate keys
+        // See https://www.mail-archive.com/acpi-bugzilla%40lists.sourceforge.net/msg51785.html
+        int duplicate = 0;
+        for (int i = 0; i < kvpairs_count; i++) {
+            if (strcmp(keys[i], str) == 0) {
+                duplicate = 1;
+                break;
+            }
+        }
+        if (duplicate)
+            continue;
+
         keys[kvpairs_count] = str;
 
         // The kernel wraps some values in literal double quotes — notably
