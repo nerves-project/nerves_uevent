@@ -445,32 +445,18 @@ static int handle_erlang_command(int fd, struct mnl_socket *nl)
     return 0;
 }
 
-static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
+// Translate one raw uevent message into an Erlang {:packet, 2} frame in `resp`.
+//
+// `str` points at the start of the message ("action@devpath\0KEY=val\0...")
+// and `str_end` just past its end. The buffer is modified in place (NUL
+// splitting and key lowercasing). Returns the number of bytes written to
+// `resp` (including the 2-byte length prefix), or 0 if the event was filtered
+// out (no '@' separator, or a devpath not under /devices).
+//
+// Separated from the socket read in nl_uevent_process_one so the parsing and
+// term encoding can be exercised by unit tests without a live netlink socket.
+static int encode_uevent(char *str, char *str_end, char *resp)
 {
-    char nlbuf[8192]; // See MNL_SOCKET_BUFFER_SIZE
-    int bytecount = mnl_socket_recvfrom(nl_uevent, nlbuf, sizeof(nlbuf));
-    if (bytecount <= 0) {
-        if (errno == EAGAIN || errno == EINTR)
-            return -1;
-        if (errno == ENOBUFS) {
-            // This doesn't getting printed in a helpful location and
-            // handling it other ways doesn't make things better. It is
-            // useful when debugging if messages are suspected to have
-            // been dropped.
-            // warnx("mnl_socket_recvfrom: netlink messages dropped");
-            stats.uevents_dropped++;
-            stats_dirty = 1;
-            return -1;
-        }
-        err(EXIT_FAILURE, "mnl_socket_recvfrom");
-    }
-
-    stats.uevents_received++;
-    stats_dirty = 1;
-
-    char *str = nlbuf;
-    char *str_end = str + bytecount;
-
     debug("uevent: %s", str);
     int resp_index = sizeof(uint16_t); // Skip over payload size
     ei_encode_version(resp, &resp_index);
@@ -582,6 +568,32 @@ static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
     }
     erlcmd_write_header_len(resp, resp_index);
     return resp_index;
+}
+
+static int nl_uevent_process_one(struct mnl_socket *nl_uevent, char *resp)
+{
+    char nlbuf[8192]; // See MNL_SOCKET_BUFFER_SIZE
+    int bytecount = mnl_socket_recvfrom(nl_uevent, nlbuf, sizeof(nlbuf));
+    if (bytecount <= 0) {
+        if (errno == EAGAIN || errno == EINTR)
+            return -1;
+        if (errno == ENOBUFS) {
+            // This doesn't getting printed in a helpful location and
+            // handling it other ways doesn't make things better. It is
+            // useful when debugging if messages are suspected to have
+            // been dropped.
+            // warnx("mnl_socket_recvfrom: netlink messages dropped");
+            stats.uevents_dropped++;
+            stats_dirty = 1;
+            return -1;
+        }
+        err(EXIT_FAILURE, "mnl_socket_recvfrom");
+    }
+
+    stats.uevents_received++;
+    stats_dirty = 1;
+
+    return encode_uevent(nlbuf, nlbuf + bytecount, resp);
 }
 
 static void send_stats()
@@ -764,6 +776,9 @@ static void uevent_discover()
     }
 }
 
+// Defined out when this file is #included by the unit-test harness, which
+// supplies its own main().
+#ifndef UEVENT_UNIT_TEST
 int main(int argc, char *argv[])
 {
     if (argc == 2 && strcmp(argv[1], "modprobe") == 0) {
@@ -849,3 +864,4 @@ int main(int argc, char *argv[])
     mnl_socket_close(nl_uevent);
     return 0;
 }
+#endif // UEVENT_UNIT_TEST
