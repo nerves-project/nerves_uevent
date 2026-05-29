@@ -5,6 +5,14 @@
 
 # Changelog
 
+## v0.1.7 - 2026-05-29
+
+* Bug fix
+  * Handle duplicate properties in battery reports on Linux 6.14 and later. See
+    https://www.mail-archive.com/acpi-bugzilla%40lists.sourceforge.net/msg51785.html.
+    Thanks to @gausby for reporting and testing the fix.
+  * Raise the max number of properties per uevent and silently drop extras
+
 ## v0.1.6 - 2026-05-08
 
 * New feature
