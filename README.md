@@ -7,6 +7,7 @@
 
 [![Hex version](https://img.shields.io/hexpm/v/nerves_uevent.svg "Hex version")](https://hex.pm/packages/nerves_uevent)
 [![API docs](https://img.shields.io/hexpm/v/nerves_uevent.svg?label=hexdocs "API docs")](https://nerves-uevent.hexdocs.pm/NervesUEvent.html)
+[![Nerves compatibility](https://compatibility.nerves-project.org/badge/nerves_uevent.svg)](https://compatibility.nerves-project.org/packages/nerves_uevent)
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/nerves-project/nerves_uevent/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/nerves-project/nerves_uevent/tree/main)
 [![REUSE status](https://api.reuse.software/badge/github.com/nerves-project/nerves_uevent)](https://api.reuse.software/info/github.com/nerves-project/nerves_uevent)
 
