@@ -77,11 +77,11 @@ all: install
 
 install: $(BUILD) $(DEFAULT_TARGETS)
 
-$(BUILD)/%.o: c_src/%.c
+$(BUILD)/%.o: c_src/%.c | $(BUILD)
 	@echo " CC $(notdir $@)"
 	$(CC) -c $(ERL_CFLAGS) $(CFLAGS) -o $@ $<
 
-$(PREFIX)/uevent: $(BUILD)/uevent.o
+$(PREFIX)/uevent: $(BUILD)/uevent.o | $(PREFIX)
 	@echo " LD $(notdir $@)"
 	$(CC) $^ $(ERL_LDFLAGS) $(LDFLAGS) -o $@
 	$(call update_perms, $@)
