@@ -15,11 +15,13 @@
 #
 # CC            C compiler
 # CROSSCOMPILE	crosscompiler prefix, if any
+# CPPFLAGS	preprocessor flags for compiling all C files
 # CFLAGS	compiler flags for compiling all C files
 # ERL_CFLAGS	additional compiler flags for files using Erlang header files
 # ERL_EI_INCLUDE_DIR include path to ei.h (Required for crosscompile)
 # ERL_EI_LIBDIR path to libei.a (Required for crosscompile)
 # LDFLAGS	linker flags for linking all binaries
+# LDLIBS	additional libraries for linking all binaries
 # ERL_LDFLAGS	additional linker flags for projects referencing Erlang libraries
 
 PREFIX = $(MIX_APP_PATH)/priv
@@ -44,14 +46,11 @@ DEFAULT_TARGETS ?= $(PREFIX) $(PREFIX)/uevent
 ERL_CFLAGS ?= -I$(ERL_EI_INCLUDE_DIR)
 ERL_LDFLAGS ?= -L$(ERL_EI_LIBDIR) -lei
 
-LDFLAGS += -lmnl
 CFLAGS ?= -O2 -Wall -Wextra -Wno-unused-parameter -pedantic
 CC ?= $(CROSSCOMPILE)-gcc
 
 # Enable for debug messages
 # CFLAGS += -DDEBUG
-
-CFLAGS += -std=gnu99
 
 ifeq ($(origin CROSSCOMPILE), undefined)
 SUDO_ASKPASS ?= /usr/bin/ssh-askpass
@@ -79,11 +78,11 @@ install: $(BUILD) $(DEFAULT_TARGETS)
 
 $(BUILD)/%.o: c_src/%.c | $(BUILD)
 	@echo " CC $(notdir $@)"
-	$(CC) -c $(ERL_CFLAGS) $(CFLAGS) -o $@ $<
+	$(CC) $(CPPFLAGS) $(ERL_CFLAGS) $(CFLAGS) -std=gnu99 -c -o $@ $<
 
 $(PREFIX)/uevent: $(BUILD)/uevent.o | $(PREFIX)
 	@echo " LD $(notdir $@)"
-	$(CC) $^ $(ERL_LDFLAGS) $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(ERL_LDFLAGS) $(LDLIBS) -lmnl -o $@
 	$(call update_perms, $@)
 
 $(PREFIX) $(BUILD):
