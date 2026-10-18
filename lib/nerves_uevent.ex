@@ -103,5 +103,5 @@ defmodule NervesUEvent do
   inactivity.  Values will lag bursts especially at boot.
   """
   @spec stats() :: NervesUEvent.stats()
-  def stats(), do: NervesUEvent.stats()
+  def stats(), do: NervesUEvent.UEvent.stats()
 end
