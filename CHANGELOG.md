@@ -5,6 +5,11 @@
 
 # Changelog
 
+## v0.1.8 - 2026-10-18
+
+* Bug fix
+  * Fix infinite loop when calling `NervesUEvent.stats/0`
+
 ## v0.1.7 - 2026-05-29
 
 * Bug fix
